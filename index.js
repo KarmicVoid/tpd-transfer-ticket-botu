@@ -16,7 +16,7 @@ const BOT_SAHIBI_ID = "1424138026631561381";
 const LOG_KANAL_ID = "1500546650815336468";
 const PANEL_YETKILI_ROLLER = ["1500556576233357375", "1496428477291696197"]; 
 
-// Etiketlenecek Roller (İstediğin rolü çıkardım)
+// Etiketlenecek Roller
 const ETIKETLENECEK_ROLLER = ["1496428477291696191", "1496428477291696192", "1496428477291696196"];
 const TAGLANACAK_USER = "1473408400061763584";
 
@@ -28,7 +28,7 @@ if (fs.existsSync('./database.json')) {
     try { ticketSayisi = JSON.parse(fs.readFileSync('./database.json', 'utf8')).ticketSayisi || 0; } catch (e) { ticketSayisi = 0; }
 }
 
-client.on('ready', () => { console.log(`${client.user.tag} Hazır!`); });
+client.on('ready', () => { console.log(`${client.user.tag} Hazır! Kategori loglama aktif.`); });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
@@ -59,20 +59,23 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Bilet kategorilerini hafızada tutmak için basit bir nesne (Bot kapanınca sıfırlanmaması için kanal konusuna yazacağız)
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.guild) return;
 
-    // TICKET AÇMA
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
-        if (interaction.replied || interaction.deferred) return; // Çift işlem koruması
+        if (interaction.replied || interaction.deferred) return;
         
         await interaction.deferReply({ ephemeral: true });
         ticketSayisi++;
         fs.writeFileSync('./database.json', JSON.stringify({ ticketSayisi }));
 
+        const kategori = interaction.values[0];
+
         const ticketChannel = await interaction.guild.channels.create({
             name: `${interaction.user.username}-ticket-${ticketSayisi}`,
             type: ChannelType.GuildText,
+            topic: `Kategori: ${kategori}`, // Kategoriyi kanal konusuna kaydediyoruz ki logda çekebilelim
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                 { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
@@ -87,14 +90,13 @@ client.on('interactionCreate', async (interaction) => {
 
         await ticketChannel.send({ 
             content: `${ETIKETLENECEK_ROLLER.map(id => `<@&${id}>`).join(" ")} <@${TAGLANACAK_USER}>`, 
-            embeds: [new EmbedBuilder().setDescription(`Merhaba ${interaction.user}, **${interaction.values[0]}** hoş geldiniz. !transfer yazarak formatı görebilirsiniz.`).setColor("#2ecc71")], 
+            embeds: [new EmbedBuilder().setDescription(`Merhaba ${interaction.user}, **${kategori}** hoş geldiniz. !transfer yazarak formatı görebilirsiniz.`).setColor("#2ecc71")], 
             components: [closeBtn] 
         });
 
-        await interaction.editReply({ content: `Bilet açıldı: ${ticketChannel}` });
+        await interaction.editReply({ content: `Biletiniz açıldı: ${ticketChannel}` });
     }
 
-    // KAPATMA ONAYI
     if (interaction.isButton() && interaction.customId === 'confirm_close') {
         const confirmRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('close_yes').setLabel('Evet✅').setStyle(ButtonStyle.Success),
@@ -115,20 +117,32 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.showModal(modal);
     }
 
-    // MODAL VE LOG
     if (interaction.isModalSubmit() && interaction.customId === 'close_modal') {
         const reason = interaction.fields.getTextInputValue('close_reason');
-        await interaction.reply({ content: "Bilet 3 saniye içinde kapatılıyor..." });
+        const kategoriBilgisi = interaction.channel.topic || "Belirtilmemiş"; // Kanal konusundan kategoriyi alıyoruz
+        
+        await interaction.reply({ content: "Bilet kaydediliyor ve 3 saniye içinde kapatılıyor..." });
 
         const messages = await interaction.channel.messages.fetch({ limit: 100 });
-        let logContent = `TPD LOG\nAçan: ${interaction.channel.name}\nKapatan: ${interaction.user.tag}\nSebep: ${reason}\n\n`;
-        messages.reverse().forEach(m => { logContent += `[${m.createdAt.toLocaleString('tr-TR')}] ${m.author.tag}: ${m.content}\n`; });
+        let logContent = `TPD TICKET TRANSCRIPT\n--------------------------\n`;
+        logContent += `Bilet Kanalı: ${interaction.channel.name}\n`;
+        logContent += `Bilet Kategorisi: ${kategoriBilgisi}\n`;
+        logContent += `Bileti Kapatan: ${interaction.user.tag}\n`;
+        logContent += `Kapatma Sebebi: ${reason}\n`;
+        logContent += `Tarih: ${new Date().toLocaleString('tr-TR')}\n`;
+        logContent += `--------------------------\n\n`;
+
+        messages.reverse().forEach(m => { 
+            if(!m.content && m.embeds.length > 0) return; // Boş mesajları/sadece butonları loglama
+            logContent += `[${m.createdAt.toLocaleString('tr-TR')}] ${m.author.tag}: ${m.content}\n`; 
+        });
 
         const attachment = new AttachmentBuilder(Buffer.from(logContent, 'utf-8'), { name: `transcript-${interaction.channel.name}.txt` });
         const logKanal = interaction.guild.channels.cache.get(LOG_KANAL_ID);
+        
         if (logKanal) {
             await logKanal.send({ 
-                content: `🚨 **Bilet Kapatıldı!**\n**Personel:** ${interaction.channel.name}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&1496428477291696197>`, 
+                content: `🚨 **Bilet Kapatıldı!**\n**Kategori:** \`${kategoriBilgisi}\`\n**Personel:** ${interaction.channel.name.split('-ticket-')[0]}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&1496428477291696197>`, 
                 files: [attachment] 
             });
         }
