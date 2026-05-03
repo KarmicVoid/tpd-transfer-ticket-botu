@@ -11,9 +11,10 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// AYARLAR VE ID'LER
+// --- AYARLAR VE ID'LER ---
+const BOT_SAHIBI_ID = "1473408400061763584"; // Senin Discord ID'n
 const LOG_KANAL_ID = "1500546650815336468";
-const ADMIN_ROL_ID = "1496428477291696197"; // Etiketlenmeyen ama gören rol
+const ADMIN_ROL_ID = "1496428477291696197"; // Paneli kullanabilecek ve etiketlenmeyecek yetkili rol
 const YETKILI_ROLLER = ["1496428477291696191", "1496428477291696192", "1496428477291696196", "1496428477291696193"];
 const TAGLANACAK_USER = "1473408400061763584";
 
@@ -29,136 +30,111 @@ function saveDb() {
     fs.writeFileSync('./database.json', JSON.stringify({ ticketSayisi }));
 }
 
-client.on('ready', () => {
-    console.log(`${client.user.tag} | TPD Ticket Botu Görevde!`);
-});
+client.on('ready', () => { console.log(`${client.user.tag} Aktif ve Güvenli!`); });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // !panel Komutu
+    // !panel Komutu Yetki Kontrolü
     if (message.content === '!panel') {
-        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const hasAdminRole = message.member.roles.cache.has(ADMIN_ROL_ID);
+        const isOwner = message.author.id === BOT_SAHIBI_ID;
+
+        if (!hasAdminRole && !isOwner) {
+            return message.reply("❌ Bu komutu sadece bot sahibi veya özel yetkili rolü kullanabilir!");
+        }
 
         const embed = new EmbedBuilder()
             .setTitle("TPD Transfere Hoş Geldiniz")
             .setDescription("TPD Transfere hoş geldiniz, aşağıdaki \"Kategori seç...\" menüsüne basarak istediğiniz kategoride ticket açabilirsiniz.")
             .setColor("#0099ff");
 
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('ticket_select')
-                    .setPlaceholder('Kategori seç...')
-                    .addOptions([
-                        { label: 'Transfer Bileti', value: 'Transfer Bileti', emoji: '🎫' },
-                        { label: 'Ekip Transfer Bileti', value: 'Ekip Transfer Bileti', emoji: '👥' },
-                        { label: 'Yetkililerle İletişim', value: 'Yetkililerle İletişim', emoji: '📞' },
-                    ]),
-            );
-
+        const row = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('ticket_select')
+                .setPlaceholder('Kategori seç...')
+                .addOptions([
+                    { label: 'Transfer Bileti', value: 'Transfer Bileti', emoji: '🎫' },
+                    { label: 'Ekip Transfer Bileti', value: 'Ekip Transfer Bileti', emoji: '👥' },
+                    { label: 'Yetkililerle İletişim', value: 'Yetkililerle İletişim', emoji: '📞' },
+                ]),
+        );
         await message.channel.send({ embeds: [embed], components: [row] });
     }
 
-    // !transfer Komutu
     if (message.content === '!transfer') {
-        const transferText = `
-**Roblox isim:**
-**Discord isim:**
-**Girdiğim kamplar:**
-**Girdiğim kamplardaki rütbelerim:**
-**Ss:**
-**Tag:** <@&1496428477291696191> <@&1496428477291696192> 
-**NOT:** Max rütbe Emniyet Genel Müdürüdür.
-        `;
-        message.channel.send(transferText);
+        message.channel.send(`**Roblox isim:**\n**Discord isim:**\n**Girdiğim kamplar:**\n**Girdiğim kamplardaki rütbelerim:**\n**Ss:**\n**Tag:** <@&1496428477291696191> <@&1496428477291696192>\n**NOT:** Max rütbe Emniyet Genel Müdürüdür.`);
     }
 });
 
 client.on('interactionCreate', async (interaction) => {
-    // Ticket Açma İşlemi
+    // TICKET AÇMA
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
-        ticketSayisi++;
-        saveDb();
-
+        ticketSayisi++; saveDb();
         const kategori = interaction.values[0];
-        const channelName = `${interaction.user.username}-ticket-${ticketSayisi}`;
-
         const ticketChannel = await interaction.guild.channels.create({
-            name: channelName,
+            name: `${interaction.user.username}-ticket-${ticketSayisi}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                { id: ADMIN_ROL_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                ...YETKILI_ROLLER.map(id => ({ id: id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }))
+                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+                { id: ADMIN_ROL_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+                ...YETKILI_ROLLER.map(id => ({ id: id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] }))
             ],
         });
 
-        const welcomeEmbed = new EmbedBuilder()
-            .setDescription(`Merhaba ${interaction.user}, **${kategori}** kategorisine hoş geldiniz. \n\n**!transfer** yazarak formatı görebilirsiniz, yetkililerimiz en yakın zamanda sizinle ilgilenecektir.`)
-            .setColor("#2ecc71");
-
         const closeBtn = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('close_ticket').setLabel('Kapat').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId('confirm_close').setLabel('Kapat').setStyle(ButtonStyle.Danger)
         );
-
         await ticketChannel.send({ 
             content: `${YETKILI_ROLLER.map(id => `<@&${id}>`).join(" ")} <@${TAGLANACAK_USER}>`, 
-            embeds: [welcomeEmbed], 
+            embeds: [new EmbedBuilder().setDescription(`Merhaba ${interaction.user}, **${kategori}** hoş geldiniz. !transfer yazarak formatı görebilirsiniz.`).setColor("#2ecc71")], 
             components: [closeBtn] 
         });
-
-        await interaction.reply({ content: `Biletiniz açıldı: ${ticketChannel}`, ephemeral: true });
+        await interaction.reply({ content: `Bilet açıldı: ${ticketChannel}`, ephemeral: true });
     }
 
-    // Kapatma Butonuna Basınca Soru Sorma (Modal)
-    if (interaction.isButton() && interaction.customId === 'close_ticket') {
-        const modal = new ModalBuilder()
-            .setCustomId('close_modal')
-            .setTitle('Bileti Kapat');
+    // KAPATMA ONAYI
+    if (interaction.isButton() && interaction.customId === 'confirm_close') {
+        const confirmRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_yes').setLabel('Evet✅').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('close_no').setLabel('Vazgeç❌').setStyle(ButtonStyle.Secondary)
+        );
+        await interaction.reply({ content: "Kapatmak istediğine emin misin?", components: [confirmRow] });
+    }
 
-        const reasonInput = new TextInputBuilder()
-            .setCustomId('close_reason')
-            .setLabel("Bilet neden kapatılsın?")
-            .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("Kapatma sebebinizi buraya yazın...")
-            .setRequired(true);
+    // VAZGEÇ
+    if (interaction.isButton() && interaction.customId === 'close_no') {
+        await interaction.message.delete();
+    }
 
-        modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+    // EVET (MODAL AÇAR)
+    if (interaction.isButton() && interaction.customId === 'close_yes') {
+        const modal = new ModalBuilder().setCustomId('close_modal').setTitle('Bileti Kapat');
+        modal.addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('close_reason').setLabel("Bilet neden kapatılsın?").setStyle(TextInputStyle.Paragraph).setRequired(true)
+        ));
         await interaction.showModal(modal);
     }
 
-    // Modal Onaylanınca Log Tutma ve Kapatma
+    // MODAL SONUCU
     if (interaction.isModalSubmit() && interaction.customId === 'close_modal') {
         const reason = interaction.fields.getTextInputValue('close_reason');
-        const channel = interaction.channel;
+        await interaction.reply({ content: "Bilet 3 saniye içinde kapatılıyor..." });
 
-        await interaction.reply({ content: "Bilet kaydediliyor ve siliniyor...", ephemeral: true });
+        const messages = await interaction.channel.messages.fetch({ limit: 100 });
+        let logContent = `TPD TICKET LOG\nBileti Açan: ${interaction.channel.name}\nKapatan: ${interaction.user.tag}\nSebep: ${reason}\nTarih: ${new Date().toLocaleString('tr-TR')}\n\n`;
+        messages.reverse().forEach(m => { logContent += `[${m.createdAt.toLocaleString('tr-TR')}] ${m.author.tag}: ${m.content}\n`; });
 
-        const messages = await channel.messages.fetch({ limit: 100 });
-        let logContent = `TPD TICKET LOG\n------------------\n`;
-        logContent += `Bileti Açan: ${channel.name.split('-ticket-')[0]}\n`;
-        logContent += `Kapatan: ${interaction.user.tag}\n`;
-        logContent += `Kapatılma Sebebi: ${reason}\n`;
-        logContent += `Açılma/Kapanış Tarihi: ${new Date().toLocaleString('tr-TR')}\n`;
-        logContent += `------------------\n\n`;
-
-        messages.reverse().forEach(m => {
-            logContent += `[${m.createdAt.toLocaleString('tr-TR')}] ${m.author.tag}: ${m.content}\n`;
-        });
-
-        const attachment = new AttachmentBuilder(Buffer.from(logContent, 'utf-8'), { name: `ticket-log-${channel.name}.txt` });
-
+        const attachment = new AttachmentBuilder(Buffer.from(logContent, 'utf-8'), { name: `transcript-${interaction.channel.name}.txt` });
         const logKanal = interaction.guild.channels.cache.get(LOG_KANAL_ID);
         if (logKanal) {
             await logKanal.send({ 
-                content: `🚨 **Bilet Kapatıldı!**\n**Personel:** ${channel.name.split('-ticket-')[0]}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&${ADMIN_ROL_ID}>`, 
+                content: `🚨 **Bilet Kapatıldı!**\n**Personel:** ${interaction.channel.name.split('-ticket-')[0]}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&${ADMIN_ROL_ID}>`, 
                 files: [attachment] 
             });
         }
-
-        setTimeout(() => channel.delete(), 5000);
+        setTimeout(() => interaction.channel.delete(), 3000);
     }
 });
 
