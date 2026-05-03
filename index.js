@@ -7,14 +7,19 @@ app.get('/', (req, res) => res.send('TPD Ticket Botu Aktif!'));
 app.listen(process.env.PORT || 3000);
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent, 
+        GatewayIntentBits.GuildMembers
+    ],
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// --- AYARLAR VE ID'LER ---
-const BOT_SAHIBI_ID = "1473408400061763584"; // Senin Discord ID'n
+// --- GÜNCEL AYARLAR VE ID'LER ---
+const BOT_SAHIBI_ID = "1424138026631561381"; // SENİN DOĞRU ID'N GÜNCELLENDİ
 const LOG_KANAL_ID = "1500546650815336468";
-const ADMIN_ROL_ID = "1496428477291696197"; // Paneli kullanabilecek ve etiketlenmeyecek yetkili rol
+const PANEL_YETKILI_ROLLER = ["1500556576233357375", "1496428477291696197"]; 
 const YETKILI_ROLLER = ["1496428477291696191", "1496428477291696192", "1496428477291696196", "1496428477291696193"];
 const TAGLANACAK_USER = "1473408400061763584";
 
@@ -30,18 +35,21 @@ function saveDb() {
     fs.writeFileSync('./database.json', JSON.stringify({ ticketSayisi }));
 }
 
-client.on('ready', () => { console.log(`${client.user.tag} Aktif ve Güvenli!`); });
+client.on('ready', () => { 
+    console.log(`${client.user.tag} Aktif! Sahibi: ${BOT_SAHIBI_ID} olarak tanımlandı.`); 
+});
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // !panel Komutu Yetki Kontrolü
     if (message.content === '!panel') {
-        const hasAdminRole = message.member.roles.cache.has(ADMIN_ROL_ID);
+        const isManager = message.member.permissions.has(PermissionFlagsBits.Administrator);
+        const hasSpecialRole = message.member.roles.cache.some(role => PANEL_YETKILI_ROLLER.includes(role.id));
         const isOwner = message.author.id === BOT_SAHIBI_ID;
 
-        if (!hasAdminRole && !isOwner) {
-            return message.reply("❌ Bu komutu sadece bot sahibi veya özel yetkili rolü kullanabilir!");
+        // EĞER SAHİBİYSEN VEYA YÖNETİCİYSEN VEYA ROLÜN VARSA ÇALIŞIR
+        if (!isManager && !hasSpecialRole && !isOwner) {
+            return message.reply("❌ Bu komutu kullanmak için yeterli yetkiniz bulunmuyor!");
         }
 
         const embed = new EmbedBuilder()
@@ -67,18 +75,17 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// ... (Geri kalan interactionCreate kodları aynı şekilde devam ediyor)
 client.on('interactionCreate', async (interaction) => {
-    // TICKET AÇMA
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
         ticketSayisi++; saveDb();
-        const kategori = interaction.values[0];
         const ticketChannel = await interaction.guild.channels.create({
             name: `${interaction.user.username}-ticket-${ticketSayisi}`,
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                 { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
-                { id: ADMIN_ROL_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+                ...PANEL_YETKILI_ROLLER.map(id => ({ id: id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] })),
                 ...YETKILI_ROLLER.map(id => ({ id: id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] }))
             ],
         });
@@ -86,15 +93,15 @@ client.on('interactionCreate', async (interaction) => {
         const closeBtn = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('confirm_close').setLabel('Kapat').setStyle(ButtonStyle.Danger)
         );
+        
         await ticketChannel.send({ 
             content: `${YETKILI_ROLLER.map(id => `<@&${id}>`).join(" ")} <@${TAGLANACAK_USER}>`, 
-            embeds: [new EmbedBuilder().setDescription(`Merhaba ${interaction.user}, **${kategori}** hoş geldiniz. !transfer yazarak formatı görebilirsiniz.`).setColor("#2ecc71")], 
+            embeds: [new EmbedBuilder().setDescription(`Merhaba ${interaction.user}, **${interaction.values[0]}** hoş geldiniz. !transfer yazarak formatı görebilirsiniz.`).setColor("#2ecc71")], 
             components: [closeBtn] 
         });
         await interaction.reply({ content: `Bilet açıldı: ${ticketChannel}`, ephemeral: true });
     }
 
-    // KAPATMA ONAYI
     if (interaction.isButton() && interaction.customId === 'confirm_close') {
         const confirmRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('close_yes').setLabel('Evet✅').setStyle(ButtonStyle.Success),
@@ -103,12 +110,10 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ content: "Kapatmak istediğine emin misin?", components: [confirmRow] });
     }
 
-    // VAZGEÇ
     if (interaction.isButton() && interaction.customId === 'close_no') {
         await interaction.message.delete();
     }
 
-    // EVET (MODAL AÇAR)
     if (interaction.isButton() && interaction.customId === 'close_yes') {
         const modal = new ModalBuilder().setCustomId('close_modal').setTitle('Bileti Kapat');
         modal.addComponents(new ActionRowBuilder().addComponents(
@@ -117,7 +122,6 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.showModal(modal);
     }
 
-    // MODAL SONUCU
     if (interaction.isModalSubmit() && interaction.customId === 'close_modal') {
         const reason = interaction.fields.getTextInputValue('close_reason');
         await interaction.reply({ content: "Bilet 3 saniye içinde kapatılıyor..." });
@@ -130,7 +134,7 @@ client.on('interactionCreate', async (interaction) => {
         const logKanal = interaction.guild.channels.cache.get(LOG_KANAL_ID);
         if (logKanal) {
             await logKanal.send({ 
-                content: `🚨 **Bilet Kapatıldı!**\n**Personel:** ${interaction.channel.name.split('-ticket-')[0]}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&${ADMIN_ROL_ID}>`, 
+                content: `🚨 **Bilet Kapatıldı!**\n**Personel:** ${interaction.channel.name.split('-ticket-')[0]}\n**Kapatan:** ${interaction.user}\n**Sebep:** ${reason}\n**Bildirim:** <@&1496428477291696197>`, 
                 files: [attachment] 
             });
         }
@@ -139,4 +143,3 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.TOKEN);
-
