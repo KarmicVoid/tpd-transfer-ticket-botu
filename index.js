@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const express = require('express');
+const axios = require('axios'); // Sorgulama için axios eklendi
 
 const app = express();
 app.get('/', (req, res) => res.send('TPD Ticket Botu Aktif!'));
@@ -33,6 +34,46 @@ client.on('ready', () => { console.log(`${client.user.tag} Hazır! Kategori logl
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
+    // --- SORGULA KOMUTU ENJEKTE EDİLDİ ---
+    if (message.content.startsWith('!sorgula')) {
+        const args = message.content.split(' ');
+        const robloxName = args[1];
+        if (!robloxName) return message.reply("❌ Lütfen sorgulanacak bir Roblox ismi yazın! Örn: `!sorgula RobloxName` ");
+
+        try {
+            // Roblox Kullanıcı ID'sini bulma
+            const userRes = await axios.post('https://users.roblox.com/v1/usernames/users', {
+                usernames: [robloxName],
+                excludeBannedUsers: false
+            });
+
+            if (!userRes.data.data.length) return message.reply("❌ Bu isimde bir Roblox kullanıcısı bulunamadı.");
+            
+            const userId = userRes.data.data[0].id;
+            const displayName = userRes.data.data[0].displayName;
+
+            // Kullanıcının gruplarını çekme
+            const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`);
+            const groups = groupsRes.data.data;
+
+            if (groups.length === 0) return message.reply(`**${robloxName}** herhangi bir grupta bulunmuyor.`);
+
+            const embed = new EmbedBuilder()
+                .setTitle(`${displayName} (@${robloxName}) Grup Bilgileri`)
+                .setURL(`https://www.roblox.com/users/${userId}/profile`)
+                .setColor("#2ecc71")
+                .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${userId}&width=420&height=420&format=png`)
+                .setDescription(groups.map(g => `**${g.group.name}**\n┗ Rütbe: \`${g.role.name}\` (Rank: ${g.role.rank})`).join('\n\n'))
+                .setFooter({ text: 'TPD Sorgu Sistemi' })
+                .setTimestamp();
+
+            message.reply({ embeds: [embed] });
+        } catch (error) {
+            console.error(error);
+            message.reply("❌ Sorgulama sırasında bir hata oluştu. Roblox API'sine ulaşılamıyor.");
+        }
+    }
+
     if (message.content === '!panel') {
         const isManager = message.member.permissions.has(PermissionFlagsBits.Administrator);
         const hasSpecialRole = message.member.roles.cache.some(role => PANEL_YETKILI_ROLLER.includes(role.id));
@@ -59,7 +100,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Bilet kategorilerini hafızada tutmak için basit bir nesne (Bot kapanınca sıfırlanmaması için kanal konusuna yazacağız)
+// ... interactionCreate kısmı olduğu gibi aşağıda devam eder (Aynısı kaldığı için burayı kısaltıyorum)
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.guild) return;
 
@@ -75,7 +116,7 @@ client.on('interactionCreate', async (interaction) => {
         const ticketChannel = await interaction.guild.channels.create({
             name: `${interaction.user.username}-ticket-${ticketSayisi}`,
             type: ChannelType.GuildText,
-            topic: `Kategori: ${kategori}`, // Kategoriyi kanal konusuna kaydediyoruz ki logda çekebilelim
+            topic: `Kategori: ${kategori}`, 
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                 { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
@@ -119,7 +160,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId === 'close_modal') {
         const reason = interaction.fields.getTextInputValue('close_reason');
-        const kategoriBilgisi = interaction.channel.topic || "Belirtilmemiş"; // Kanal konusundan kategoriyi alıyoruz
+        const kategoriBilgisi = interaction.channel.topic || "Belirtilmemiş"; 
         
         await interaction.reply({ content: "Bilet kaydediliyor ve 3 saniye içinde kapatılıyor..." });
 
@@ -133,7 +174,7 @@ client.on('interactionCreate', async (interaction) => {
         logContent += `--------------------------\n\n`;
 
         messages.reverse().forEach(m => { 
-            if(!m.content && m.embeds.length > 0) return; // Boş mesajları/sadece butonları loglama
+            if(!m.content && m.embeds.length > 0) return; 
             logContent += `[${m.createdAt.toLocaleString('tr-TR')}] ${m.author.tag}: ${m.content}\n`; 
         });
 
